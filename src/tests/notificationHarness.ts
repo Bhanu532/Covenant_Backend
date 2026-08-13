@@ -3,8 +3,9 @@ import jwt from "jsonwebtoken";
 import { Interest } from "../models/Interest";
 import { Notification } from "../models/Notification";
 import { authenticateSocketToken } from "../socket";
+import { getJwtSecret } from "../config/auth";
 
-const secret = process.env.JWT_SECRET || "matrimony_secret";
+const secret = getJwtSecret();
 const userId = "507f1f77bcf86cd799439011";
 
 assert.throws(() => authenticateSocketToken(undefined), /Unauthorized/);

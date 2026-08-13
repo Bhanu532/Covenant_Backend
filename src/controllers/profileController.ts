@@ -2,10 +2,52 @@ import { Response } from "express";
 import { Profile } from "../models/Profile";
 import { AuthRequest } from "../middleware/auth";
 
+const WRITABLE = ["full_name","gender","date_of_birth","denomination","church_name","occupation","education","city","country","height_cm","marital_status","bio","looking_for","photo_url","photos","is_complete","profile_date","born_again_date","baptism_date","baptism_church","ministry_responsibility","native_place","present_location","weight_kg","education_history","profession","organization","experience","employment_type","previous_organization","born_again_testimony","eu_egf_history","church_history","other_ministry","spiritual_gifts","spiritual_future_plans","secular_future_plans","partner_priorities","father_details","mother_details","parents_location","siblings_details","references","health_details"] as const;
+const NARRATIVES = new Set(["bio","looking_for","born_again_testimony","eu_egf_history","church_history","other_ministry","spiritual_gifts","spiritual_future_plans","secular_future_plans","partner_priorities","father_details","mother_details","siblings_details","health_details"]);
+function validateProfile(body: any) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("Profile data must be an object.");
+  const data: any = {};
+  for (const key of WRITABLE) if (Object.prototype.hasOwnProperty.call(body, key)) data[key] = body[key];
+  if (typeof data.full_name !== "string" || data.full_name.trim().length < 2 || data.full_name.trim().length > 100) throw new Error("Full name must be 2–100 characters.");
+  data.full_name = data.full_name.trim();
+  if (!['male','female'].includes(data.gender)) throw new Error("Gender must be male or female.");
+  for (const [key, value] of Object.entries(data)) if (typeof value === "string") { const max = NARRATIVES.has(key) ? 5000 : 200; if (value.length > max) throw new Error(`${key.replaceAll('_',' ')} cannot exceed ${max} characters.`); data[key] = value.trim() || null; }
+  for (const key of ["date_of_birth","profile_date","born_again_date","baptism_date"]) if (data[key]) { if (!/^\d{4}-\d{2}-\d{2}$/.test(data[key]) || Number.isNaN(Date.parse(data[key]))) throw new Error(`${key.replaceAll('_',' ')} must be a valid date.`); if (new Date(data[key]) > new Date()) throw new Error(`${key.replaceAll('_',' ')} cannot be in the future.`); }
+  if (data.date_of_birth) { const age = (Date.now() - Date.parse(data.date_of_birth)) / 31557600000; if (age < 18 || age > 100) throw new Error("Age must be between 18 and 100."); }
+  if (data.height_cm != null && (!Number.isFinite(data.height_cm) || data.height_cm < 100 || data.height_cm > 250)) throw new Error("Height must be between 100 and 250 cm.");
+  if (data.weight_kg != null && (!Number.isFinite(data.weight_kg) || data.weight_kg < 30 || data.weight_kg > 300)) throw new Error("Weight must be between 30 and 300 kg.");
+  if (data.marital_status != null && !['never_married','widowed','divorced'].includes(data.marital_status)) throw new Error("Invalid marital status.");
+  if (data.employment_type != null && !["Full Time","Part Time","Self Employed","Business","Unemployed","Other","full_time","part_time","self_employed","business","unemployed","other"].includes(data.employment_type)) throw new Error("Invalid employment type.");
+  if (data.education_history != null) { if (!Array.isArray(data.education_history) || data.education_history.length > 20) throw new Error("Education history cannot exceed 20 entries."); data.education_history = data.education_history.map((entry:any, i:number) => { if (!entry || typeof entry !== 'object' || Array.isArray(entry) || Object.keys(entry).some(k => !['course','institution','city','passing_year'].includes(k))) throw new Error(`Education entry ${i + 1} is invalid.`); const clean:any = {}; for (const key of ['course','institution','city','passing_year']) { if (typeof entry[key] !== 'string' || entry[key].trim().length > 200) throw new Error(`Education entry ${i + 1} has an invalid ${key}.`); clean[key] = entry[key].trim(); } if (clean.passing_year && (!/^\d{4}$/.test(clean.passing_year) || +clean.passing_year < 1940 || +clean.passing_year > new Date().getFullYear() + 10)) throw new Error(`Education entry ${i + 1} has an invalid passing year.`); return clean; }); }
+  if (data.references != null) { if (!Array.isArray(data.references) || data.references.length > 10) throw new Error("References cannot exceed 10 entries."); data.references = data.references.map((entry:any, i:number) => { if (!entry || typeof entry !== 'object' || Array.isArray(entry) || Object.keys(entry).some(k => !['name','place','ministry_association','acquaintance','contact'].includes(k))) throw new Error(`Reference ${i + 1} is invalid.`); const clean:any = {}; for (const key of ['name','place','ministry_association','acquaintance','contact']) { if (typeof entry[key] !== 'string' || entry[key].trim().length > 200) throw new Error(`Reference ${i + 1} has an invalid ${key}.`); clean[key] = entry[key].trim(); } if (clean.contact && !/^[+\d][\d\s()+-]{5,30}$/.test(clean.contact)) throw new Error(`Reference ${i + 1} has an invalid contact.`); return clean; }); }
+  if (data.photos != null) { if (!Array.isArray(data.photos) || data.photos.length > 8) throw new Error("You can add up to 8 photos."); if (data.photos.filter((p:any) => p?.isPrimary).length > 1) throw new Error("Only one photo may be primary."); let total = 0; data.photos = data.photos.map((p:any,i:number) => { if (!p || typeof p !== 'object' || Array.isArray(p) || Object.keys(p).some(k => !['id','url','isPrimary','order','createdAt','_id'].includes(k)) || typeof p.id !== 'string' || typeof p.url !== 'string' || typeof p.isPrimary !== 'boolean' || !Number.isSafeInteger(p.order) || p.order < 0 || typeof p.createdAt !== 'string' || Number.isNaN(Date.parse(p.createdAt))) throw new Error(`Photo ${i + 1} is invalid.`); const match = p.url.match(/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/); if (!match) throw new Error(`Photo ${i + 1} must be JPEG, PNG, or WEBP.`); const bytes = Buffer.from(match[2], 'base64'); if (bytes.length > 5 * 1024 * 1024) throw new Error(`Photo ${i + 1} exceeds 5 MB.`); const magic = (match[1] === 'png' && bytes[0] === 0x89 && bytes[1] === 0x50) || (match[1] === 'jpeg' && bytes[0] === 0xff && bytes[1] === 0xd8) || (match[1] === 'webp' && bytes.subarray(0,4).toString() === 'RIFF' && bytes.subarray(8,12).toString() === 'WEBP'); if (!magic) throw new Error(`Photo ${i + 1} content is invalid.`); total += bytes.length; return { id:p.id, url:p.url, isPrimary:p.isPrimary, order:p.order, createdAt:p.createdAt }; }); if (total > 9 * 1024 * 1024) throw new Error("Profile photos exceed the 9 MB total limit."); }
+  return data;
+}
+
 // GET /api/profiles
 export async function getProfiles(req: AuthRequest, res: Response) {
   try {
-    const profiles = await Profile.find();
+    // Browse cards only need this public summary. Do not send private profile
+    // fields (family, health, testimony, references, etc.) in the list response.
+    const profiles = await Profile.find().select(
+      [
+        "user",
+        "full_name",
+        "gender",
+        "date_of_birth",
+        "denomination",
+        "church_name",
+        "occupation",
+        "education",
+        "city",
+        "country",
+        "present_location",
+        "ministry_responsibility",
+        "born_again_date",
+        "photo_url",
+        "is_complete",
+      ].join(" "),
+    );
     const formatted = profiles.map((p) => ({
       ...p.toObject(),
       id: p.user.toString(),
@@ -45,11 +87,12 @@ export async function getProfileById(req: AuthRequest, res: Response) {
 // PUT /api/profiles/me
 export async function updateMyProfile(req: AuthRequest, res: Response) {
   try {
+    const updates = validateProfile(req.body);
     let profile = await Profile.findOne({ user: req.userId });
     if (!profile) {
-      profile = new Profile({ user: req.userId, ...req.body });
+      profile = new Profile({ user: req.userId, ...updates });
     } else {
-      Object.assign(profile, req.body);
+      Object.assign(profile, updates);
     }
 
     if (profile.photos && profile.photos.length > 0) {
@@ -60,6 +103,6 @@ export async function updateMyProfile(req: AuthRequest, res: Response) {
     await profile.save();
     return res.json({ ...profile.toObject(), id: profile.user.toString() });
   } catch (error: any) {
-    return res.status(500).json({ message: error.message || "Failed to save profile" });
+    return res.status(error?.name === "ValidationError" ? 400 : 400).json({ message: error.message || "Failed to save profile" });
   }
 }

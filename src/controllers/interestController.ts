@@ -3,6 +3,7 @@ import { Interest } from "../models/Interest";
 import { Profile } from "../models/Profile";
 import { AuthRequest } from "../middleware/auth";
 import { createAndEmitNotification } from "../services/notificationService";
+import mongoose from "mongoose";
 
 // GET /api/interests
 export async function getInterests(req: AuthRequest, res: Response) {
@@ -72,9 +73,13 @@ export async function sendInterest(req: AuthRequest, res: Response) {
     const { to_user_id, message } = req.body;
     const from_user_id = req.userId;
 
-    if (!to_user_id) {
+    if (typeof to_user_id !== "string" || !mongoose.isValidObjectId(to_user_id)) {
       return res.status(400).json({ message: "Recipient user ID is required" });
     }
+
+    if (message != null && (typeof message !== "string" || message.trim().length > 1000)) return res.status(400).json({ message: "Message cannot exceed 1000 characters." });
+    const recipientExists = await Profile.exists({ user: to_user_id });
+    if (!recipientExists) return res.status(404).json({ message: "Recipient profile not found." });
 
     if (from_user_id === to_user_id) {
       return res
@@ -105,7 +110,7 @@ export async function sendInterest(req: AuthRequest, res: Response) {
         from_user: from_user_id,
         to_user: to_user_id,
         status: "pending",
-        message: message || null,
+        message: typeof message === "string" && message.trim() ? message.trim() : null,
       });
     } catch (error: any) {
       // A simultaneous retry may win the unique (sender, recipient) insert.
