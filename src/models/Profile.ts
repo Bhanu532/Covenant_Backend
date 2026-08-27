@@ -33,7 +33,11 @@ export interface IProfile extends Document {
   occupation: string | null;
   education: string | null;
   city: string | null;
+  state: string | null;
   country: string | null;
+  mobile: string | null;
+  is_born_again: boolean;
+  is_baptized: boolean;
   height_cm: number | null;
   marital_status: "never_married" | "widowed" | "divorced" | null;
   bio: string | null;
@@ -41,6 +45,8 @@ export interface IProfile extends Document {
   photo_url: string | null;
   photos: IProfilePhoto[];
   is_complete: boolean;
+  profileStatus: "NOT_STARTED" | "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED";
+  profileRejectionReason: string | null;
   profile_date: string | null;
   born_again_date: string | null;
   baptism_date: string | null;
@@ -63,6 +69,14 @@ export interface IProfile extends Document {
   spiritual_future_plans: string | null;
   secular_future_plans: string | null;
   partner_priorities: string | null;
+  preferred_min_age: number | null;
+  preferred_max_age: number | null;
+  preferred_location: string | null;
+  preferred_denomination: string | null;
+  preferred_education: string | null;
+  preferred_career: string | null;
+  preferred_ministry: string | null;
+  partner_expectations: string | null;
   father_details: string | null;
   mother_details: string | null;
   parents_location: string | null;
@@ -84,7 +98,11 @@ const ProfileSchema = new Schema<IProfile>(
     occupation: { type: String, default: null },
     education: { type: String, default: null },
     city: { type: String, default: null },
+    state: { type: String, default: null },
     country: { type: String, default: null },
+    mobile: { type: String, default: null },
+    is_born_again: { type: Boolean, default: false },
+    is_baptized: { type: Boolean, default: false },
     height_cm: { type: Number, default: null },
     marital_status: { type: String, enum: ["never_married", "widowed", "divorced"], default: null },
     bio: { type: String, default: null },
@@ -100,6 +118,8 @@ const ProfileSchema = new Schema<IProfile>(
       },
     ],
     is_complete: { type: Boolean, default: false },
+    profileStatus: { type: String, enum: ["NOT_STARTED", "DRAFT", "SUBMITTED", "APPROVED", "REJECTED"], default: "NOT_STARTED" },
+    profileRejectionReason: { type: String, default: null },
     profile_date: { type: String, default: null },
     born_again_date: { type: String, default: null },
     baptism_date: { type: String, default: null },
@@ -129,6 +149,14 @@ const ProfileSchema = new Schema<IProfile>(
     spiritual_future_plans: { type: String, default: null },
     secular_future_plans: { type: String, default: null },
     partner_priorities: { type: String, default: null },
+    preferred_min_age: { type: Number, default: null },
+    preferred_max_age: { type: Number, default: null },
+    preferred_location: { type: String, default: null },
+    preferred_denomination: { type: String, default: null },
+    preferred_education: { type: String, default: null },
+    preferred_career: { type: String, default: null },
+    preferred_ministry: { type: String, default: null },
+    partner_expectations: { type: String, default: null },
     father_details: { type: String, default: null },
     mother_details: { type: String, default: null },
     parents_location: { type: String, default: null },

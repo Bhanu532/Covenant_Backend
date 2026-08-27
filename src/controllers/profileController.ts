@@ -1,16 +1,101 @@
 import { Response } from "express";
 import { Profile } from "../models/Profile";
+import { User } from "../models/User";
 import { AuthRequest } from "../middleware/auth";
+import { calculateMatchScore } from "../services/matchingService";
 
-const WRITABLE = ["full_name","gender","date_of_birth","denomination","church_name","occupation","education","city","country","height_cm","marital_status","bio","looking_for","photo_url","photos","is_complete","profile_date","born_again_date","baptism_date","baptism_church","ministry_responsibility","native_place","present_location","weight_kg","education_history","profession","organization","experience","employment_type","previous_organization","born_again_testimony","eu_egf_history","church_history","other_ministry","spiritual_gifts","spiritual_future_plans","secular_future_plans","partner_priorities","father_details","mother_details","parents_location","siblings_details","references","health_details"] as const;
-const NARRATIVES = new Set(["bio","looking_for","born_again_testimony","eu_egf_history","church_history","other_ministry","spiritual_gifts","spiritual_future_plans","secular_future_plans","partner_priorities","father_details","mother_details","siblings_details","health_details"]);
+const WRITABLE = [
+  "full_name",
+  "gender",
+  "date_of_birth",
+  "denomination",
+  "church_name",
+  "occupation",
+  "education",
+  "city",
+  "state",
+  "country",
+  "mobile",
+  "is_born_again",
+  "is_baptized",
+  "height_cm",
+  "marital_status",
+  "bio",
+  "looking_for",
+  "photo_url",
+  "photos",
+  "is_complete",
+  "profile_date",
+  "born_again_date",
+  "baptism_date",
+  "baptism_church",
+  "ministry_responsibility",
+  "native_place",
+  "present_location",
+  "weight_kg",
+  "education_history",
+  "profession",
+  "organization",
+  "experience",
+  "employment_type",
+  "previous_organization",
+  "born_again_testimony",
+  "eu_egf_history",
+  "church_history",
+  "other_ministry",
+  "spiritual_gifts",
+  "spiritual_future_plans",
+  "secular_future_plans",
+  "partner_priorities",
+  "preferred_min_age",
+  "preferred_max_age",
+  "preferred_location",
+  "preferred_denomination",
+  "preferred_education",
+  "preferred_career",
+  "preferred_ministry",
+  "partner_expectations",
+  "father_details",
+  "mother_details",
+  "parents_location",
+  "siblings_details",
+  "references",
+  "health_details",
+] as const;
+
+const NARRATIVES = new Set([
+  "bio",
+  "looking_for",
+  "born_again_testimony",
+  "eu_egf_history",
+  "church_history",
+  "other_ministry",
+  "spiritual_gifts",
+  "spiritual_future_plans",
+  "secular_future_plans",
+  "partner_priorities",
+  "partner_expectations",
+  "father_details",
+  "mother_details",
+  "siblings_details",
+  "health_details",
+]);
+
 function validateProfile(body: any) {
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("Profile data must be an object.");
   const data: any = {};
   for (const key of WRITABLE) if (Object.prototype.hasOwnProperty.call(body, key)) data[key] = body[key];
-  if (typeof data.full_name !== "string" || data.full_name.trim().length < 2 || data.full_name.trim().length > 100) throw new Error("Full name must be 2–100 characters.");
-  data.full_name = data.full_name.trim();
-  if (!['male','female'].includes(data.gender)) throw new Error("Gender must be male or female.");
+  if (data.full_name !== undefined) {
+    if (typeof data.full_name !== "string" || data.full_name.trim().length < 2 || data.full_name.trim().length > 100) {
+      throw new Error("Full name must be 2–100 characters.");
+    }
+    data.full_name = data.full_name.trim();
+  }
+  if (data.gender !== undefined) {
+    if (!['male','female'].includes(data.gender)) {
+      throw new Error("Gender must be male or female.");
+    }
+  }
   for (const [key, value] of Object.entries(data)) if (typeof value === "string") { const max = NARRATIVES.has(key) ? 5000 : 200; if (value.length > max) throw new Error(`${key.replaceAll('_',' ')} cannot exceed ${max} characters.`); data[key] = value.trim() || null; }
   for (const key of ["date_of_birth","profile_date","born_again_date","baptism_date"]) if (data[key]) { if (!/^\d{4}-\d{2}-\d{2}$/.test(data[key]) || Number.isNaN(Date.parse(data[key]))) throw new Error(`${key.replaceAll('_',' ')} must be a valid date.`); if (new Date(data[key]) > new Date()) throw new Error(`${key.replaceAll('_',' ')} cannot be in the future.`); }
   if (data.date_of_birth) { const age = (Date.now() - Date.parse(data.date_of_birth)) / 31557600000; if (age < 18 || age > 100) throw new Error("Age must be between 18 and 100."); }
@@ -24,12 +109,35 @@ function validateProfile(body: any) {
   return data;
 }
 
-// GET /api/profiles
+// GET /api/profiles (Browse Profiles - ONLY VALID PROFILES)
 export async function getProfiles(req: AuthRequest, res: Response) {
   try {
-    // Browse cards only need this public summary. Do not send private profile
-    // fields (family, health, testimony, references, etc.) in the list response.
-    const profiles = await Profile.find().select(
+    // Check requesting user's status first!
+    const reqUser = await User.findById(req.userId);
+    if (!reqUser || reqUser.paymentStatus !== "PAID" || reqUser.registrationStatus !== "APPROVED" || reqUser.accountStatus !== "ACTIVE") {
+      return res.status(403).json({ message: "Your account is not approved to browse profiles." });
+    }
+
+    const reqProfile = await Profile.findOne({ user: req.userId });
+    if (!reqProfile || reqProfile.profileStatus !== "APPROVED") {
+      return res.status(403).json({ message: "Your profile must be approved before browsing." });
+    }
+
+    // Find all valid users (PAID + APPROVED + ACTIVE)
+    const validUsers = await User.find({
+      paymentStatus: "PAID",
+      registrationStatus: "APPROVED",
+      accountStatus: "ACTIVE",
+      _id: { $ne: req.userId },
+    }).select("_id");
+
+    const validUserIds = validUsers.map((u) => u._id);
+
+    // Filter profiles where profileStatus == APPROVED and user in validUserIds
+    const profiles = await Profile.find({
+      user: { $in: validUserIds },
+      profileStatus: "APPROVED",
+    }).select(
       [
         "user",
         "full_name",
@@ -40,21 +148,94 @@ export async function getProfiles(req: AuthRequest, res: Response) {
         "occupation",
         "education",
         "city",
+        "state",
         "country",
         "present_location",
         "ministry_responsibility",
         "born_again_date",
         "photo_url",
         "is_complete",
+        "profileStatus",
+        "preferred_min_age",
+        "preferred_max_age",
+        "preferred_location",
+        "preferred_denomination",
       ].join(" "),
     );
-    const formatted = profiles.map((p) => ({
-      ...p.toObject(),
-      id: p.user.toString(),
-    }));
+
+    const formatted = profiles.map((p) => {
+      const matchData = calculateMatchScore(reqProfile, p);
+      return {
+        ...p.toObject(),
+        id: p.user.toString(),
+        matchScore: matchData.matchScore,
+      };
+    });
+
     return res.json(formatted);
   } catch (error: any) {
     return res.status(500).json({ message: error.message || "Failed to fetch profiles" });
+  }
+}
+
+// GET /api/profiles/recommended
+export async function getRecommendedProfiles(req: AuthRequest, res: Response) {
+  try {
+    const reqUser = await User.findById(req.userId);
+    if (!reqUser || reqUser.paymentStatus !== "PAID" || reqUser.registrationStatus !== "APPROVED" || reqUser.accountStatus !== "ACTIVE") {
+      return res.status(403).json({ message: "Your account is not approved to view recommended profiles." });
+    }
+
+    const reqProfile = await Profile.findOne({ user: req.userId });
+    if (!reqProfile || reqProfile.profileStatus !== "APPROVED") {
+      return res.status(403).json({ message: "Your profile must be approved before viewing recommendations." });
+    }
+
+    const validUsers = await User.find({
+      paymentStatus: "PAID",
+      registrationStatus: "APPROVED",
+      accountStatus: "ACTIVE",
+      _id: { $ne: req.userId },
+    }).select("_id");
+
+    const validUserIds = validUsers.map((u) => u._id);
+
+    // Opposite gender filter for matrimony recommendations
+    const oppositeGender = reqProfile.gender === "male" ? "female" : "male";
+
+    const profiles = await Profile.find({
+      user: { $in: validUserIds },
+      profileStatus: "APPROVED",
+      gender: oppositeGender,
+    });
+
+    const matches = profiles.map((p) => {
+      const matchResult = calculateMatchScore(reqProfile, p);
+      return {
+        id: p.user.toString(),
+        user: p.user.toString(),
+        full_name: p.full_name,
+        gender: p.gender,
+        date_of_birth: p.date_of_birth,
+        denomination: p.denomination,
+        church_name: p.church_name,
+        occupation: p.occupation || p.profession,
+        education: p.education,
+        city: p.city,
+        state: p.state,
+        country: p.country,
+        present_location: p.present_location,
+        photo_url: p.photo_url,
+        matchScore: matchResult.matchScore,
+        breakdown: matchResult.breakdown,
+      };
+    });
+
+    matches.sort((a, b) => b.matchScore - a.matchScore);
+
+    return res.json(matches);
+  } catch (error: any) {
+    return res.status(500).json({ message: error.message || "Failed to fetch recommended profiles" });
   }
 }
 
@@ -78,7 +259,15 @@ export async function getProfileById(req: AuthRequest, res: Response) {
     if (!profile) {
       return res.status(404).json({ message: "Profile not found" });
     }
-    return res.json({ ...profile.toObject(), id: profile.user.toString() });
+
+    // Hide sensitive reference & health details when viewing other profiles
+    const obj: any = profile.toObject();
+    if (req.userId?.toString() !== req.params.id) {
+      delete obj.references;
+      delete obj.health_details;
+    }
+
+    return res.json({ ...obj, id: profile.user.toString() });
   } catch (error: any) {
     return res.status(500).json({ message: error.message || "Failed to fetch profile" });
   }
@@ -88,6 +277,8 @@ export async function getProfileById(req: AuthRequest, res: Response) {
 export async function updateMyProfile(req: AuthRequest, res: Response) {
   try {
     const updates = validateProfile(req.body);
+    const action = req.body.action; // "save_draft" or "submit_profile"
+
     let profile = await Profile.findOne({ user: req.userId });
     if (!profile) {
       profile = new Profile({ user: req.userId, ...updates });
@@ -98,6 +289,15 @@ export async function updateMyProfile(req: AuthRequest, res: Response) {
     if (profile.photos && profile.photos.length > 0) {
       const primaryPhoto = profile.photos.find((p) => p.isPrimary) || profile.photos[0];
       profile.photo_url = primaryPhoto.url;
+    }
+
+    if (action === "submit_profile") {
+      profile.profileStatus = "SUBMITTED";
+      profile.profileRejectionReason = null;
+    } else if (action === "save_draft" || !profile.profileStatus || profile.profileStatus === "NOT_STARTED") {
+      if (profile.profileStatus !== "SUBMITTED" && profile.profileStatus !== "APPROVED") {
+        profile.profileStatus = "DRAFT";
+      }
     }
 
     await profile.save();

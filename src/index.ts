@@ -10,6 +10,7 @@ import interestRoutes from "./routes/interestRoutes";
 import adminRoutes from "./routes/adminRoutes";
 import notificationRoutes from "./routes/notificationRoutes";
 import trustedVoiceRoutes from "./routes/trustedVoiceRoutes";
+import paymentRoutes from "./routes/paymentRoutes";
 import { initializeSocket } from "./socket";
 import { User } from "./models/User";
 import { Profile } from "./models/Profile";
@@ -34,6 +35,7 @@ app.use(express.json({ limit: "12mb" }));
 
 // Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/payment", paymentRoutes);
 app.use("/api/profiles", profileRoutes);
 app.use("/api/interests", interestRoutes);
 app.use("/api/notifications", notificationRoutes);

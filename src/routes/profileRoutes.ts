@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   getProfiles,
+  getRecommendedProfiles,
   getMyProfile,
   getProfileById,
   updateMyProfile,
@@ -9,9 +10,10 @@ import { authMiddleware } from "../middleware/auth";
 
 const router = Router();
 
-router.get("/", getProfiles);
+router.get("/", authMiddleware, getProfiles);
+router.get("/recommended", authMiddleware, getRecommendedProfiles);
 router.get("/me", authMiddleware, getMyProfile);
-router.get("/:id", getProfileById);
+router.get("/:id", authMiddleware, getProfileById);
 router.put("/me", authMiddleware, updateMyProfile);
 
 export default router;
